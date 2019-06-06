@@ -1,10 +1,6 @@
 import MongoSwift
 import TensorFlow
 
-public enum TFMongoSwiftError: Error {
-    case dataCorrupt
-}
-
 private enum Query {
     case find(filter: Document?, opts: FindOptions)
     case aggregate(pipeline: [Document], opts: AggregateOptions)
