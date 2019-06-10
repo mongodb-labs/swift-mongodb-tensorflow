@@ -103,10 +103,12 @@ public struct MongoDataset<C: Codable, T: TensorGroup & InitializableFromSequenc
     }
 
     public func makeIterator() -> Iterator {
-        guard let cursor = try? self.query.execute(on: self.collection) else {
-            fatalError("couldn't get cursor")
+        do {
+            let cursor = try self.query.execute(on: self.collection)
+            return Iterator(wrapping: cursor, batchSize: self.batchSize)
+        } catch {
+            fatalError("Error executing query: \(error)")
         }
-        return Iterator(wrapping: cursor, batchSize: self.batchSize)
     }
 }
 
@@ -116,31 +118,43 @@ public struct MongoDatasetIterator<C: Codable, T: TensorGroup & InitializableFro
         where T.SequenceType == C {
     private let cursor: MongoCursor<Document>
     private let batchSize: Int32
+    private var exhausted: Bool
+    private var bsonError: Error?
+
+    /// The error that occurred while iterating the underlying cursor, if one exists.
+    public var cursorError: Error? {
+        if let cursorErr = self.cursor.error {
+            return cursorErr
+        }
+        return self.bsonError
+    }
 
     internal init(wrapping cursor: MongoCursor<Document>, batchSize: Int32) {
         self.cursor = cursor
         self.batchSize = batchSize
+        self.exhausted = false
     }
 
     public mutating func next() -> T? {
+        guard !exhausted else {
+            return nil
+        }
+
         let decoder = BSONDecoder()
         var elements: [C] = []
         for _ in 0 ..< self.batchSize {
             guard let record = self.cursor.next() else {
-                if let error = self.cursor.error {
-                    if case UserError.logicError(_) = error {
-                        continue
-                    } else {
-                        print("failed iterating cursor: \(error)")
-                    }
-                }
+                self.exhausted = true
                 break
             }
-            guard let element = try? decoder.decode(C.self, from: record) else {
-                print("failed decoding from \(record)")
+
+            do {
+                let element = try decoder.decode(C.self, from: record)
+                elements.append(element)
+            } catch {
+                self.bsonError = error
                 break
             }
-            elements.append(element)
         }
 
         guard !elements.isEmpty else {
