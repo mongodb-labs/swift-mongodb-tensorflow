@@ -2,21 +2,8 @@ import MongoSwift
 import TensorFlow
 
 private enum Query {
-    case find(filter: Document?, opts: FindOptions)
-    case aggregate(pipeline: [Document], opts: AggregateOptions)
-
-    fileprivate var batchSize: Int32 {
-        switch self {
-        case let .find(_, opts):
-            // this value is always set
-            // swiftlint:disable:next force_unwrapping
-            return opts.batchSize!
-        case let .aggregate(_, opts):
-            // this value is always set
-            // swiftlint:disable:next force_unwrapping
-            return opts.batchSize!
-        }
-    }
+    case find(filter: Document?, opts: FindOptions?)
+    case aggregate(pipeline: [Document])
 
     fileprivate func execute(on collection: MongoCollection<Document>) throws -> MongoCursor<Document> {
         switch self {
@@ -25,48 +12,39 @@ private enum Query {
                 return try collection.find(filter, options: opts)
             }
             return try collection.find(options: opts)
-        case let .aggregate(pipeline, opts):
-            return try collection.aggregate(pipeline, options: opts)
+        case let .aggregate(pipeline):
+            return try collection.aggregate(pipeline)
         }
     }
 }
 
-/// Dataset backed by a lazily evaluated cursor. Each batch makes a round trip to the server. Each iteration of the
-/// iterator yields a `TensorGroup` converted from the first generic type to the second.
-public struct MongoDataset<C: Codable, T: TensorGroup & InitializableFromSequence>: Sequence where T.SequenceType == C {
-    public typealias Iterator = MongoDatasetIterator<C, T>
+/// Dataset backed by a lazily evaluated cursor. Each iteration yields a `TensorGroup` mapped from the first generic
+/// type to the second.
+public struct MongoDataset<M: TensorGroupMapping & Codable, T>: Sequence where M.Group == T {
+    public typealias Iterator = MongoDatasetIterator<M, T>
     public typealias Element = T
 
     private let client: MongoClient
     private let collection: MongoCollection<Document>
     private var query: Query
-
-    private var batchSize: Int32 {
-        get {
-            return self.query.batchSize
-        }
-        set(newSize) {
-            switch self.query {
-            case let .find(filter, opts):
-                let newOpts = FindOptions(batchSize: newSize, limit: opts.limit, projection: opts.projection)
-                self.query = .find(filter: filter, opts: newOpts)
-            case let .aggregate(pipeline, _):
-                let newOpts = AggregateOptions(batchSize: newSize)
-                self.query = .aggregate(pipeline: pipeline, opts: newOpts)
-            }
-        }
-    }
+    private let groupFactory: () -> T
+    private var batchSize: Int = 1
 
     /// Initialize a `Dataset` from the result of the provided MongoDB aggregation pipeline.
     /// - SeeAlso: https://docs.mongodb.com/manual/aggregation/
-    public init(uri: String? = nil, db: String, collection: String, pipeline: [Document]) throws {
+    public init(uri: String? = nil,
+                db: String,
+                collection: String,
+                pipeline: [Document],
+                groupFactory: @escaping () -> T) throws {
         if let uri = uri {
             self.client = try MongoClient(uri)
         } else {
             self.client = try MongoClient()
         }
         self.collection = client.db(db).collection(collection)
-        self.query = .aggregate(pipeline: pipeline, opts: AggregateOptions(batchSize: 1))
+        self.query = .aggregate(pipeline: pipeline)
+        self.groupFactory = groupFactory
     }
 
     /// Initialize a `Dataset` from the given MongoDB collection, optionally providing a filter, projection, or limit
@@ -76,7 +54,8 @@ public struct MongoDataset<C: Codable, T: TensorGroup & InitializableFromSequenc
                 collection: String,
                 filter: Document? = nil,
                 projection: Document? = nil,
-                limit: Int64? = nil) throws {
+                limit: Int64? = nil,
+                groupFactory: @escaping () -> T) throws {
         if let uri = uri {
             self.client = try MongoClient(uri)
         } else {
@@ -84,19 +63,21 @@ public struct MongoDataset<C: Codable, T: TensorGroup & InitializableFromSequenc
         }
 
         self.collection = self.client.db(db).collection(collection)
-        let opts = FindOptions(batchSize: 1, limit: limit, projection: projection)
+        let opts = FindOptions(limit: limit, projection: projection)
         self.query = .find(filter: filter, opts: opts)
+        self.groupFactory = groupFactory
     }
 
-    private init(copying dataset: MongoDataset<C, T>) {
+    private init(copying dataset: MongoDataset<M, T>) {
         self.client = dataset.client
         self.collection = dataset.collection
         self.query = dataset.query
+        self.groupFactory = dataset.groupFactory
     }
 
     /// Returns a copy of this dataset that populates the `TensorGroup`s yielded by iteration with batches of tensors
     /// from the given dataset.
-    public func batched(_ batchSize: Int32) throws -> MongoDataset<C, T> {
+    public func batched(_ batchSize: Int) throws -> MongoDataset<M, T> {
         var other = MongoDataset(copying: self)
         other.batchSize = batchSize
         return other
@@ -105,34 +86,34 @@ public struct MongoDataset<C: Codable, T: TensorGroup & InitializableFromSequenc
     public func makeIterator() -> Iterator {
         do {
             let cursor = try self.query.execute(on: self.collection)
-            return Iterator(wrapping: cursor, batchSize: self.batchSize)
+            return Iterator(wrapping: cursor, batchSize: self.batchSize, factory: self.groupFactory)
         } catch {
             fatalError("Error executing query: \(error)")
         }
     }
 }
 
-/// Iterator for a `MongoDataset` backed by a lazily evaluated cursor. Each iteration makes constitutes a round trip to
-/// the server. The values are converted to their `TensorGroup` representation and combined into a single group.
-public struct MongoDatasetIterator<C: Codable, T: TensorGroup & InitializableFromSequence>: IteratorProtocol
-        where T.SequenceType == C {
+/// Iterator for a `MongoDataset` backed by a lazily evaluated cursor. Each iteration yields a batch of the dataset.
+public struct MongoDatasetIterator<C: TensorGroupMapping & Codable, T>: IteratorProtocol where C.Group == T {
     private let cursor: MongoCursor<Document>
-    private let batchSize: Int32
+    private let batchSize: Int
+    private let groupFactory: () -> T
     private var exhausted: Bool
-    private var bsonError: Error?
+    private var otherError: Error?
 
     /// The error that occurred while iterating the underlying cursor, if one exists.
     public var cursorError: Error? {
         if let cursorErr = self.cursor.error {
             return cursorErr
         }
-        return self.bsonError
+        return self.otherError
     }
 
-    internal init(wrapping cursor: MongoCursor<Document>, batchSize: Int32) {
+    internal init(wrapping cursor: MongoCursor<Document>, batchSize: Int, factory: @escaping () -> T) {
         self.cursor = cursor
         self.batchSize = batchSize
         self.exhausted = false
+        self.groupFactory = factory
     }
 
     public mutating func next() -> T? {
@@ -152,7 +133,7 @@ public struct MongoDatasetIterator<C: Codable, T: TensorGroup & InitializableFro
                 let element = try decoder.decode(C.self, from: record)
                 elements.append(element)
             } catch {
-                self.bsonError = error
+                self.otherError = error
                 break
             }
         }
@@ -161,76 +142,15 @@ public struct MongoDatasetIterator<C: Codable, T: TensorGroup & InitializableFro
             return nil
         }
 
-        return T(from: elements)
-    }
-}
+        var group = self.groupFactory()
 
-extension Dataset {
-    /// Initialize a `Dataset` from the result of a MongoDB query.
-    /// An optional "transform" function can also be passed in that mutates the entire dataset before it is batched
-    /// (e.g. for normalization).
-    public init<T: Codable>(from cursor: MongoCursor<T>, transform: ((inout Element) -> Void)? = nil)
-            where Element: InitializableFromSequence, Element.SequenceType == T {
-        var elements = Element(from: Array(cursor))
-
-        if let f = transform {
-            f(&elements)
+        do {
+            try group.populate(mappings: elements)
+        } catch {
+            self.otherError = error
+            return nil
         }
 
-        self.init(elements: elements)
-    }
-
-    /// Initialize a `Dataset` from the result of the provided MongoDB aggregation pipeline.
-    /// An optional "transform" function can also be passed in that mutates the entire dataset before it is batched
-    /// (e.g. for normalization).
-    /// - SeeAlso: https://docs.mongodb.com/manual/aggregation/
-    public init<C: Codable>(uri: String? = nil,
-                            db: String,
-                            collection: String,
-                            pipeline: [Document],
-                            outputType: C.Type,
-                            transform: ((inout Element) -> Void)? = nil) throws
-            where Element: InitializableFromSequence, Element.SequenceType == C {
-        let client: MongoClient
-        if let uri = uri {
-            client = try MongoClient(uri)
-        } else {
-            client = try MongoClient()
-        }
-        let coll = client.db(db).collection(collection)
-        let cursor = try coll.aggregate(pipeline)
-
-        let decoder = BSONDecoder()
-        var elements = Element(from: try cursor.map { try decoder.decode(C.self, from: $0) })
-
-        if let f = transform {
-            f(&elements)
-        }
-
-        self.init(elements: elements)
-    }
-
-    /// Initialize a `Dataset` from the given MongoDB collection, optionally providing a filter, projection, or limit
-    /// on the number of results.
-    /// An optional "transform" function can also be passed in that mutates the entire dataset before it is batched
-    /// (e.g. for normalization).
-    public init<C: Codable>(uri: String? = nil,
-                            db: String,
-                            collection: String,
-                            filter: Document = [:],
-                            projection: Document? = nil,
-                            limit: Int64? = nil,
-                            collectionType: C.Type,
-                            transform: ((inout Element) -> Void)? = nil) throws
-            where Element: InitializableFromSequence, Element.SequenceType == C {
-        let client: MongoClient
-        if let uri = uri {
-            client = try MongoClient(uri)
-        } else {
-            client = try MongoClient()
-        }
-        let coll = client.db(db).collection(collection, withType: C.self)
-        let cursor = try coll.find(filter, options: FindOptions(limit: limit, projection: projection))
-        self.init(from: cursor, transform: transform)
+        return group
     }
 }
