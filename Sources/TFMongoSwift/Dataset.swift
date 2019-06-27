@@ -30,8 +30,17 @@ public struct MongoDataset<M: TensorGroupMapping & Codable, T>: Sequence where M
     private let groupFactory: () -> T
     private var batchSize: Int = 1
 
-    /// Initialize a `Dataset` from the result of the provided MongoDB aggregation pipeline.
-    /// - SeeAlso: https://docs.mongodb.com/manual/aggregation/
+    /**
+     * Initialize a `MongoDataset` from the result of the provided MongoDB aggregation pipeline.
+     *
+     * - Parameters:
+     *   - uri: Optional, the MongoDB connection string designating which MongoDB instance to connect to. Defaults
+     *          to localhost:27017.
+     *   - db: The name of the database to perform the aggregation against.
+     *   - collection: The name of the collection to perform the aggregation against.
+     *   - groupFactory: A closure that can produce an empty instance of the `TensorGroup` to be populated.
+     * - SeeAlso: https://docs.mongodb.com/manual/aggregation/
+     */
     public init(uri: String? = nil,
                 db: String,
                 collection: String,
@@ -47,8 +56,20 @@ public struct MongoDataset<M: TensorGroupMapping & Codable, T>: Sequence where M
         self.groupFactory = groupFactory
     }
 
-    /// Initialize a `Dataset` from the given MongoDB collection, optionally providing a filter, projection, or limit
-    /// on the number of results.
+    /**
+     * Initialize a `Dataset` from the given MongoDB collection, optionally providing a filter, projection, or limit
+     * on the number of results.
+     *
+     * - Parameters:
+     *   - uri: Optional, the MongoDB connection string designating which MongoDB instance to connect to. Defaults
+     *          to localhost:27017.
+     *   - db: The name of the database to containing the dataset collection.
+     *   - collection: The name of the collection containing the dataset.
+     *   - filter: Optional, a filter that documents must match to be included in the dataset.
+     *   - projection: Optional, a document specifying which fields should be included in the retrieved documents.
+     *   - limit: Optional, a limit on the number of documents included in the dataset.
+     *   - groupFactory: A closure that can produce an empty instance of the `TensorGroup` to be populated.
+     */
     public init(uri: String? = nil,
                 db: String,
                 collection: String,

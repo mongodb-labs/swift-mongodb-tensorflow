@@ -241,8 +241,20 @@ extension TensorGroup where Self: KeyPathIterable {
         return copy
     }
 
-    /// Returns a copy of this `TensorGroup` populated from the given MongoDB collection according to the provided
-    /// `TensorGroupMapping`.
+    /**
+     * Returns a copy of this `TensorGroup` populated from the given MongoDB collection according to the provided
+     * `TensorGroupMapping`.
+     *
+     * - Parameters:
+     *   - uri: Optional, the MongoDB connection string designating which MongoDB instance to connect to. Defaults
+     *          to localhost:27017.
+     *   - db: The name of the database to containing the dataset collection.
+     *   - collection: The name of the collection containing the dataset.
+     *   - filter: Optional, a filter that documents must match to be included in the dataset.
+     *   - projection: Optional, a document specifying which fields should be included in the retrieved documents.
+     *   - limit: Optional, a limit on the number of documents included in the dataset.
+     *   - mapping: The `TensorGroupMapping` used to map fields of the documents to the output `TensorGroup`.
+     */
     public func populated<M: TensorGroupMapping & Codable>(uri: String? = nil,
                                                            db: String,
                                                            collection: String,
@@ -261,7 +273,19 @@ extension TensorGroup where Self: KeyPathIterable {
         return copy
     }
 
-    /// Populate this `TensorGroup` from the given MongoDB collection according to the provided `TensorGroupMapping`.
+    /**
+     * Populate this `TensorGroup` from the given MongoDB collection according to the provided `TensorGroupMapping`.
+     *
+     * - Parameters:
+     *   - uri: Optional, the MongoDB connection string designating which MongoDB instance to connect to. Defaults
+     *          to localhost:27017.
+     *   - db: The name of the database to containing the dataset collection.
+     *   - collection: The name of the collection containing the dataset.
+     *   - filter: Optional, a filter that documents must match to be included in the dataset.
+     *   - projection: Optional, a document specifying which fields should be included in the retrieved documents.
+     *   - limit: Optional, a limit on the number of documents included in the dataset.
+     *   - mapping: The `TensorGroupMapping` used to map fields of the documents to this `TensorGroup`.
+     */
     public mutating func populate<M: TensorGroupMapping & Codable>(uri: String? = nil,
                                                                    db: String,
                                                                    collection: String,
@@ -281,9 +305,18 @@ extension TensorGroup where Self: KeyPathIterable {
         try self.populate(mappings: data)
     }
 
-    /// Returns a copy of this `TensorGroup` populated from the results of the given MongoDB aggregation query on the
-    /// given namespace according to the provided `TensorGroupMapping`.
-    /// `TensorGroupMapping`.
+    /**
+     * Returns a copy of this `TensorGroup` populated from the results of the given MongoDB aggregation query on the
+     * given namespace according to the provided `TensorGroupMapping`.
+     *
+     * - Parameters:
+     *   - uri: Optional, the MongoDB connection string designating which MongoDB instance to connect to. Defaults
+     *          to localhost:27017.
+     *   - db: The name of the database to perform the aggregation against.
+     *   - collection: The name of the collection to perform the aggregation against.
+     *   - mapping: The `TensorGroupMapping` used to map fields of the result documents to the output `TensorGroup`.
+     * - SeeAlso: https://docs.mongodb.com/manual/aggregation/
+     */
     public func populated<M: TensorGroupMapping & Codable>(uri: String? = nil,
                                                            db: String,
                                                            collection: String,
@@ -298,9 +331,18 @@ extension TensorGroup where Self: KeyPathIterable {
         return copy
     }
 
-    /// Populate this `TensorGroup` from the results of the given MongoDB aggregation query on the given namespace
-    /// according to the provided `TensorGroupMapping`.
-    /// - SeeAlso: https://docs.mongodb.com/manual/aggregation/
+    /**
+     * Populate this `TensorGroup` from the results of the given MongoDB aggregation query on the given namespace
+     *  according to the provided `TensorGroupMapping`.
+     *
+     * - Parameters:
+     *   - uri: Optional, the MongoDB connection string designating which MongoDB instance to connect to. Defaults
+     *          to localhost:27017.
+     *   - db: The name of the database to perform the aggregation against.
+     *   - collection: The name of the collection to perform the aggregation against.
+     *   - mapping: The `TensorGroupMapping` used to map fields of the result documents to this `TensorGroup`.
+     * - SeeAlso: https://docs.mongodb.com/manual/aggregation/
+     */
     public mutating func populate<M: TensorGroupMapping & Codable>(uri: String? = nil,
                                                                    db: String,
                                                                    collection: String,
