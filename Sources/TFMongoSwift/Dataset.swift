@@ -57,7 +57,7 @@ public struct MongoDataset<M: TensorGroupMapping & Codable, T>: Sequence where M
     }
 
     /**
-     * Initialize a `Dataset` from the given MongoDB collection, optionally providing a filter, projection, or limit
+     * Initialize a `MongoDataset` from the given MongoDB collection, optionally providing a filter, projection, or limit
      * on the number of results.
      *
      * - Parameters:
