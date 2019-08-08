@@ -50,6 +50,7 @@ excluded:
   - Examples/*/.build
   - Sources/libbson
   - Sources/libmongoc
+  - Sources/IrisExample
   - Package.swift
   - Examples/*/Package.swift
 
